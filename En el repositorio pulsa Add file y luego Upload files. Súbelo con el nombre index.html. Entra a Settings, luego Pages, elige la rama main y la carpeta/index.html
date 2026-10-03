@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Valle + Noticias · Encuestas</title>
+<style>
+:root { --navy:#16325c; --red:#c81e1e; --paper:#f6f3ee; --ink:#122033; }
+* { box-sizing: border-box; }
+body { margin:0; font-family: Georgia, serif; background:var(--paper); color:var(--ink); }
+header { background:var(--navy); color:#fff; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; }
+main { max-width:720px; margin:0 auto; padding:22px 16px 48px; }
+h1 { font-size:1.7rem; line-height:1.15; }
+.card, .q { background:#fff; border:1px solid #e7e1d8; border-radius:14px; padding:14px; margin:12px 0; }
+label.opt { display:flex; gap:10px; align-items:center; border:1px solid #e7e1d8; border-radius:12px; padding:10px; margin:8px 0; }
+input, button, textarea { font: inherit; }
+button, .btn { background:var(--red); color:#fff; border:0; border-radius:999px; padding:10px 16px; text-decoration:none; display:inline-block; }
+.ghost { background:#fff; color:var(--navy); border:1px solid #ddd; }
+.muted { color:#57534e; }
+input[type=text], textarea { width:100%; padding:8px; border:1px solid #ddd; border-radius:8px; }
+</style>
+</head>
+<body>
+<header><strong>Valle + Noticias</strong><span>Encuestas</span></header>
+<main id="app">Cargando…</main>
+<script>
+const KEY = "valle_pages_v1";
+const esc = (s) => String(s||"").replace(/[&<>"]/g, c => ({'&':'&','<':'<','>':'>','"':'"'}[c]));
+function load(){ try { return JSON.parse(localStorage.getItem(KEY)) || {surveys:[]}; } catch(e){ return {surveys:[]}; } }
+function save(db){ localStorage.setItem(KEY, JSON.stringify(db)); }
+function uid(){ return Math.random().toString(36).slice(2,10); }
+function enc(obj){
+  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function dec(s){
+  s = s.replace(/-/g,"+").replace(/_/g,"/"); while (s.length % 4) s += "=";
+  const bin = atob(s); const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+function linkFor(s){
+  const payload = {id:s.id, t:s.title, d:s.description||"", q:s.questions.map(q => ({x:q.text, o:q.options}))};
+  return location.origin + location.pathname + "#e=" + enc(payload);
+}
+const app = document.getElementById("app");
+function home(){
+  const db = load();
+  app.innerHTML = "<h1>Encuestas</h1><p class='muted'>Se abre en el navegador. No hay que instalar nada.</p>" +
+    db.surveys.map(s => "<article class='card'><h2>"+esc(s.title)+"</h2><p><a class='btn' href='#v="+s.id+"'>Votar</a> <button class='ghost' data-copy='"+esc(linkFor(s))+"'>Copiar enlace</button></p><input readonly value='"+esc(linkFor(s))+"'></article>").join("") +
+    "<p><a class='btn' href='#nueva'>Crear encuesta</a></p>";
+}
+function vote(s){
+  if (localStorage.getItem("voted_"+s.id)) {
+    app.innerHTML = "<h1>Ya votaste</h1><p>Gracias. Los resultados no se muestran al público.</p><a href='#/'>Volver</a>";
+    return;
+  }
+  app.innerHTML = "<h1>"+esc(s.title)+"</h1><p class='muted'>"+esc(s.description||"")+"</p><form id='f'>" +
+    s.questions.map((q,i) => "<fieldset class='q'><h2>"+esc(q.text)+"</h2>" + q.options.map(o => "<label class='opt'><input type='radio' name='q"+i+"' value='"+esc(o)+"' required> <span>"+esc(o)+"</span></label>").join("") + "</fieldset>").join("") +
+    "<button>Enviar voto</button></form>";
+  document.getElementById("f").onsubmit = (e) => {
+    e.preventDefault();
+    localStorage.setItem("voted_"+s.id, "1");
+    app.innerHTML = "<h1>Voto registrado</h1><p>Gracias por participar.</p>";
+  };
+}
+function create(){
+  app.innerHTML = "<h1>Nueva encuesta</h1><form id='f'><label>Título<input name='title' required></label><label>Descripción<textarea name='description'></textarea></label><label>Pregunta<input name='q' required></label><label>Opciones, una por línea<textarea name='opts' required>Opción 1\nOpción 2</textarea></label><button>Publicar</button></form>";
+  document.getElementById("f").onsubmit = (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const opts = String(fd.get("opts")).split(/\n/).map(x => x.trim()).filter(Boolean);
+    const db = load();
+    db.surveys.unshift({ id: uid(), title: fd.get("title"), description: fd.get("description"), questions: [{text: fd.get("q"), options: opts}] });
+    save(db);
+    location.hash = "#/";
+  };
+}
+function route(){
+  const h = location.hash || "#/";
+  if (h.startsWith("#e=")) {
+    try { vote(dec(h.slice(3))); } catch(err) { app.innerHTML = "<h1>Enlace dañado</h1>"; }
+    return;
+  }
+  if (h.startsWith("#v=")) {
+    const s = load().surveys.find(x => x.id === h.slice(3));
+    if (!s) { app.innerHTML = "<h1>No está en este navegador</h1><p>Pide el enlace para compartir.</p>"; return; }
+    vote({id:s.id, title:s.title, description:s.description, questions:s.questions});
+    return;
+  }
+  if (h === "#nueva") return create();
+  home();
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-copy]");
+  if (!b) return;
+  navigator.clipboard.writeText(b.getAttribute("data-copy"));
+  b.textContent = "Copiado";
+});
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>
